@@ -1,0 +1,104 @@
+---
+title: "Activity Recognition"
+author: "Juan Manuel Chaparro"
+date: "8 de mayo de 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(caret)
+library(MLmetrics)
+library(dplyr)
+```
+
+## Activity Identification by Sensor Data
+
+This report describes the way to predict "classe" variable, that represents an activity, from all available data from Human Activity Recognition (=HAR) data set.
+Raw data was downloaded from a website and stored in two data frames: allTrain and allTest.
+
+```{r rawData}
+allTrain <- read.table("pml-training.csv", sep = ",", header = TRUE, stringsAsFactors = FALSE)
+dim(allTrain)
+allTest <- read.table("pml-testing.csv", sep = ",", header = TRUE, stringsAsFactors = FALSE)
+```
+
+There were `r ncol(allTrain)` predictor variables available.
+
+## Feature Selection
+
+To simplify the model and avoid missing values, I limited the Train and Test data sets to predictor variables reporting move on X, Y and Z axis. 
+Predictor variables were filtered by name. Target variable, "classe", was kept on the Train data set 
+
+```{r filterPredictors}
+myTrain <- allTrain[, grep("_[xyz]$", names(allTrain))]
+myTest <- allTest[, grep("_[xyz]$", names(allTest))]
+myTrain$classe <- allTrain$classe
+```
+
+## Algorithm Selection
+
+Since target variable is a factor, we choose a classification algorithm. Two algorithms were tried and compared:  
+- Partitioning and Regression Tree
+- Generalized Boosted Regression (particularly, Stochastic Gradient Boosting)
+
+To perform cross validation, Train data set was partitioned.
+
+```{r splitTrain}
+inTrain <- createDataPartition(y=myTrain$classe, p=0.75, list=FALSE)
+dsTrain <- myTrain[inTrain,]
+dsCval <- myTrain[-inTrain,]
+```
+
+Algorithms were trained with 'caret' package. 
+
+```{r trainAlgorithms}
+rpFit <- train(classe~., data=dsTrain, method="rpart", tuneLength = 150)
+gbmFit <- train(classe~., data=dsTrain, method="gbm", verbose = FALSE)
+```
+
+## Parameter Selection
+
+train function identified the most suitable parameters for each algorithm. Accuracy was used to select optimal model using the largest value.
+Final parameters for each algorithm/model are listed below.
+
+```{r paramAlgorithms}
+print("Best fit parameters for Regression Tree Model")
+rpFit$bestTune
+print("Best fit parameters for Generalized Boosted Model")
+gbmFit$bestTune
+```
+
+## Model Evaluation
+
+Models were cross validated with data set aside from Train data. Predictions were made with the model and validated against actual values of the target variable.
+Model accuracy and confusion matrix were used to compare the models.
+
+```{r evaluation}
+rpPred <- predict(rpFit, dsCval)
+gbmPred <- predict(gbmFit, dsCval)
+Accuracy(rpPred, dsCval$classe)
+Accuracy(gbmPred, dsCval$classe)
+confusionMatrix(rpPred, as.factor(dsCval$classe))
+confusionMatrix(gbmPred, as.factor(dsCval$classe))
+```
+
+"gbm" model is slightly more accurate than "rpart", hence "gbm" will be used to provide the predictions for the Test data set.
+
+## Predict Test Data Set
+
+Predictions with both algorithms are generated and stored on a data frame. A new variable compares both predictions to verify how many predicted values differ by algorithm. Only about 15% of predictions are different with each of the algorithms.
+
+```{r prediction}
+myPred <- data.frame(X = seq(1:20),
+                     rpPred = predict(rpFit, myTest),
+                     gbmPred = predict(gbmFit, myTest))
+myPred <- mutate(myPred, 
+                 samePred = ifelse(rpPred == gbmPred, TRUE, FALSE))
+table(myPred$samePred)
+```
+
+## Reference
+
+R script with all the details can be found in GitHub repository: see <https://github.com/chaparrj/chaparrj.github.io/blob/master/cProject.R>.
